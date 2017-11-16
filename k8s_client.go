@@ -7,6 +7,7 @@ import (
 	appsv1beta1 "k8s.io/api/apps/v1beta1"
 	apiv1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
@@ -80,6 +81,10 @@ func NewDeploymentInstance(deploySpec *DeploymentSpec) *appsv1beta1.Deployment {
 									Value: deploySpec.MayaServerIP,
 								},
 								{
+									Name:  "SLACK_INCOMING_WEB_HOOK",
+									Value: deploySpec.SlackWebHook,
+								},
+								{
 									Name:  "API_KEY",
 									Value: deploySpec.APIKey,
 								},
@@ -93,12 +98,46 @@ func NewDeploymentInstance(deploySpec *DeploymentSpec) *appsv1beta1.Deployment {
 
 }
 
+func NewSeviceInstance(deploySpec *DeploymentSpec) *apiv1.Service {
+	return &apiv1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Labels: map[string]string{
+				"app": "chat-server",
+			},
+			Name: deploySpec.DeploymentName + "-service",
+		},
+		Spec: apiv1.ServiceSpec{
+			Type: apiv1.ServiceTypeLoadBalancer,
+			Ports: []apiv1.ServicePort{
+				{
+					Name: "chat-server-port",
+					Port: 30551, //TODO: Need to change. Accept env var as of now.
+					TargetPort: intstr.IntOrString{
+						StrVal: "8000",
+					},
+					Protocol: apiv1.ProtocolTCP,
+				},
+			},
+			Selector: map[string]string{
+				"app": "chat-server",
+			},
+		},
+	}
+}
+
 func CreateDeployment(client kubernetes.Interface, deploySpec *DeploymentSpec) {
 
 	deployClient := client.AppsV1beta1().Deployments(apiv1.NamespaceDefault)
 	deploymentInstance := NewDeploymentInstance(deploySpec)
 	deployClient.Create(deploymentInstance)
 	fmt.Printf("Deployment %s is created!\n", deploySpec.DeploymentName)
+}
+
+func CreateService(client kubernetes.Interface, deploySpec *DeploymentSpec) {
+	serviceClient := client.Core().Services(apiv1.NamespaceDefault)
+	serviceInstance := NewSeviceInstance(deploySpec)
+	serviceClient.Create(serviceInstance)
+	fmt.Printf("Service %s is created! \n", deploySpec.DeploymentName+"-service")
 }
 
 func main() {
@@ -117,7 +156,7 @@ func main() {
 	}
 
 	CreateDeployment(clientset, DeploymentSpecObj)
-
+	CreateService(clientset, DeploymentSpecObj)
 }
 
 func int32ptr(number int32) *int32 {
