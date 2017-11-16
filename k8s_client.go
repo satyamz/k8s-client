@@ -7,7 +7,6 @@ import (
 	appsv1beta1 "k8s.io/api/apps/v1beta1"
 	apiv1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
@@ -19,6 +18,7 @@ var (
 	mayaServerIP      = flag.String("maya-server-ip", "", "Maya server IP with port (e.g. http://192.168.0.0:8000)")
 	slackWebHook      = flag.String("slack-web-hook", "", "Slack incoming web hook")
 	apiKey            = flag.String("api-key", "", "API Key to authenticate with Maya Server")
+	externalIP        = flag.String("external-ip", "", "External IP for chat server")
 )
 
 type DeploymentSpec struct {
@@ -28,9 +28,10 @@ type DeploymentSpec struct {
 	MayaServerIP      string
 	SlackWebHook      string
 	APIKey            string
+	ExternalIP        string
 }
 
-func NewDeploymentSpec(DeploymentName, SlackToken, VerificationToken, MayaServerIP, SlackWebHook, APIKey string) *DeploymentSpec {
+func NewDeploymentSpec(DeploymentName, SlackToken, VerificationToken, MayaServerIP, SlackWebHook, APIKey, ExternalIP string) *DeploymentSpec {
 	return &DeploymentSpec{
 		DeploymentName:    DeploymentName,
 		SlackToken:        SlackToken,
@@ -38,6 +39,7 @@ func NewDeploymentSpec(DeploymentName, SlackToken, VerificationToken, MayaServer
 		MayaServerIP:      MayaServerIP,
 		SlackWebHook:      SlackWebHook,
 		APIKey:            APIKey,
+		ExternalIP:        ExternalIP,
 	}
 
 }
@@ -58,11 +60,11 @@ func NewDeploymentInstance(deploySpec *DeploymentSpec) *appsv1beta1.Deployment {
 				Spec: apiv1.PodSpec{
 					Containers: []apiv1.Container{
 						{
-							Name:  "Chat Server",
-							Image: "mulebot/chatserver:v02",
+							Name:  "chat-server",
+							Image: "mulebot/chat-server:v03",
 							Ports: []apiv1.ContainerPort{
 								{
-									Name:          "chat-server-http-port",
+									Name:          "http",
 									Protocol:      apiv1.ProtocolTCP,
 									ContainerPort: 8000,
 								},
@@ -107,16 +109,17 @@ func NewSeviceInstance(deploySpec *DeploymentSpec) *apiv1.Service {
 			Name: deploySpec.DeploymentName + "-service",
 		},
 		Spec: apiv1.ServiceSpec{
-			Type: apiv1.ServiceTypeLoadBalancer,
+			Type: apiv1.ServiceTypeNodePort,
 			Ports: []apiv1.ServicePort{
 				{
-					Name: "chat-server-port",
-					Port: 30551, //TODO: Need to change. Accept env var as of now.
-					TargetPort: intstr.IntOrString{
-						StrVal: "8000",
-					},
+					Name:     "chatserver-port",
+					Port:     8000, //TODO: Need to change. Accept env var as of now.
+					NodePort: 30550,
 					Protocol: apiv1.ProtocolTCP,
 				},
+			},
+			ExternalIPs: []string{
+				deploySpec.ExternalIP,
 			},
 			Selector: map[string]string{
 				"app": "chat-server",
@@ -129,20 +132,30 @@ func CreateDeployment(client kubernetes.Interface, deploySpec *DeploymentSpec) {
 
 	deployClient := client.AppsV1beta1().Deployments(apiv1.NamespaceDefault)
 	deploymentInstance := NewDeploymentInstance(deploySpec)
-	deployClient.Create(deploymentInstance)
-	fmt.Printf("Deployment %s is created!\n", deploySpec.DeploymentName)
+	deployRes, err := deployClient.Create(deploymentInstance)
+	if err != nil {
+		fmt.Printf("[Error]: %+v", err)
+		return
+	}
+
+	fmt.Printf("Deployment details:\n %+v\n", deployRes)
 }
 
 func CreateService(client kubernetes.Interface, deploySpec *DeploymentSpec) {
 	serviceClient := client.Core().Services(apiv1.NamespaceDefault)
 	serviceInstance := NewSeviceInstance(deploySpec)
-	serviceClient.Create(serviceInstance)
-	fmt.Printf("Service %s is created! \n", deploySpec.DeploymentName+"-service")
+	serveiceRes, err := serviceClient.Create(serviceInstance)
+	if err != nil {
+		fmt.Printf("[Error]: %+v", err)
+		return
+	}
+
+	fmt.Printf("Service details \n %+v \n", serveiceRes)
 }
 
 func main() {
 	flag.Parse()
-	DeploymentSpecObj := NewDeploymentSpec(*deploymentName, *slackToken, *verificationToken, *mayaServerIP, *slackWebHook, *apiKey)
+	DeploymentSpecObj := NewDeploymentSpec(*deploymentName, *slackToken, *verificationToken, *mayaServerIP, *slackWebHook, *apiKey, *externalIP)
 
 	config, err := rest.InClusterConfig()
 	if err != nil {
