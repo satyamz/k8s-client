@@ -7,6 +7,7 @@ import (
 	appsv1beta1 "k8s.io/api/apps/v1beta1"
 	apiv1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
@@ -61,7 +62,7 @@ func NewDeploymentInstance(deploySpec *DeploymentSpec) *appsv1beta1.Deployment {
 					Containers: []apiv1.Container{
 						{
 							Name:  "chat-server",
-							Image: "mulebot/chat-server:v03",
+							Image: "mulebot/chat-server:v06",
 							Ports: []apiv1.ContainerPort{
 								{
 									Name:          "http",
@@ -109,17 +110,16 @@ func NewSeviceInstance(deploySpec *DeploymentSpec) *apiv1.Service {
 			Name: deploySpec.DeploymentName + "-service",
 		},
 		Spec: apiv1.ServiceSpec{
-			Type: apiv1.ServiceTypeNodePort,
+			Type: apiv1.ServiceTypeLoadBalancer,
 			Ports: []apiv1.ServicePort{
 				{
-					Name:     "chatserver-port",
-					Port:     8000, //TODO: Need to change. Accept env var as of now.
-					NodePort: 30550,
+					Name: "chatserver-port",
+					Port: 8000, //TODO: Need to change. Accept env var as of now.
+					TargetPort: intstr.IntOrString{
+						IntVal: 8000,
+					},
 					Protocol: apiv1.ProtocolTCP,
 				},
-			},
-			ExternalIPs: []string{
-				deploySpec.ExternalIP,
 			},
 			Selector: map[string]string{
 				"app": "chat-server",
